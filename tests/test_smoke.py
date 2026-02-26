@@ -43,6 +43,8 @@ TOOL_MODULES = [
     "ouroboros.tools.control",
     "ouroboros.tools.browser",
     "ouroboros.tools.review",
+    "ouroboros.tools.moex_digest",
+    "ouroboros.tools.cron_tools",
 ]
 
 SUPERVISOR_MODULES = [
@@ -52,6 +54,7 @@ SUPERVISOR_MODULES = [
     "supervisor.workers",
     "supervisor.git_ops",
     "supervisor.events",
+    "supervisor.cron",
 ]
 
 
@@ -115,6 +118,10 @@ EXPECTED_TOOLS = [
     "compact_context",
     "list_available_tools",
     "enable_tools",
+    # MOEX market digest
+    "get_moex_digest",
+    # Cron scheduler
+    "list_cron_jobs", "add_cron_job", "remove_cron_job", "enable_cron_job", "disable_cron_job",
 ]
 
 
