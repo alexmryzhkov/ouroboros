@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import urllib.request
 import urllib.error
 from datetime import datetime, timezone
@@ -201,6 +202,89 @@ def get_movers(top_n: int = 5) -> str:
     return "\n".join(lines)
 
 
+def get_tradingview_ideas(top_n: int = 5) -> str:
+    """Fetch top trading ideas for MOEX from TradingView using embedded JSON."""
+    url = "https://www.tradingview.com/ideas/moex/"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "ru,en;q=0.9",
+    }
+
+    _MONTHS = ("", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+               "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+
+    try:
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            html = resp.read().decode("utf-8", errors="replace")
+
+        marker = '"ideas":{"data":'
+        pos = html.find(marker)
+        if pos == -1:
+            raise ValueError("JSON marker not found in page")
+
+        # Start at the `{"data":` opening brace
+        start = pos + len('"ideas":')
+        depth = 0
+        end = start
+        for i, ch in enumerate(html[start:], start):
+            if ch == '{':
+                depth += 1
+            elif ch == '}':
+                depth -= 1
+                if depth == 0:
+                    end = i + 1
+                    break
+        else:
+            raise ValueError("Unbalanced JSON braces")
+
+        ideas_blob = json.loads(html[start:end])
+        items = ideas_blob.get("data", {}).get("items", [])[:top_n]
+
+        if not items:
+            raise ValueError("No items found in JSON")
+
+        result_lines = [f"💡 Топ-{top_n} идей TradingView (MOEX)\n"]
+        for idx, item in enumerate(items, 1):
+            name = item.get("name", "—")
+            description = item.get("description", "")
+            if len(description) > 100:
+                description = description[:100] + "..."
+            chart_url = item.get("chart_url", url)
+            updated_at = item.get("updated_at", "")
+            symbol = item.get("symbol", {})
+            direction = symbol.get("direction", 0)
+            ticker = symbol.get("short_name", "")
+            author = item.get("user", {}).get("username", "")
+
+            try:
+                dt = datetime.fromisoformat(updated_at.replace("Z", "+00:00"))
+                date_str = f"{dt.day:02d} {_MONTHS[dt.month]} {dt.year}"
+            except Exception:
+                date_str = updated_at[:10] if updated_at else "—"
+
+            if direction == 1:
+                dir_str = "📈 LONG"
+            elif direction == -1:
+                dir_str = "📉 SHORT"
+            else:
+                dir_str = "➡️ NEUTRAL"
+
+            ticker_part = f" | {ticker}" if ticker else ""
+            result_lines.append(f"{idx}. {dir_str}{ticker_part} — {name}")
+            if description:
+                result_lines.append(f"   {description}")
+            result_lines.append(f"   👤 {author} | 📅 {date_str} | 🔗 {chart_url}")
+            result_lines.append("")
+
+        return "\n".join(result_lines).rstrip()
+
+    except Exception as e:
+        log.warning("TradingView parse error: %s", e)
+        return f"⚠️ TradingView: не удалось получить идеи ({e})"
+
+
 def _get_moex_digest(ctx: ToolContext) -> str:
     """Fetch full MOEX morning digest: indices, top stocks, movers."""
     now_msk = datetime.now(timezone.utc).strftime("%d.%m.%Y %H:%M UTC")
@@ -210,6 +294,7 @@ def _get_moex_digest(ctx: ToolContext) -> str:
         "## 📈 Индексы\n" + get_moex_indices(),
         "\n## 🏆 Топ акций по объёму\n" + get_top_stocks(10),
         "\n## 📊 Движение рынка\n" + get_movers(5),
+        "\n## 💡 Идеи TradingView\n" + get_tradingview_ideas(5),
     ]
 
     return "\n".join(parts)
