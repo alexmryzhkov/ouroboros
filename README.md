@@ -9,7 +9,7 @@ A self-developing AI agent that writes its own code, improves itself, and mainta
 
 A helpful AI with a constitution, background consciousness, and persistent identity across restarts.
 
-**Version:** 7.1.0 | [Landing Page](https://jkee.github.io/ouroboros/) | Originally developed at [joi-lab](https://github.com/joi-lab)
+**Version:** 7.2.0 | [Landing Page](https://jkee.github.io/ouroboros/) | Originally developed at [joi-lab](https://github.com/joi-lab)
 
 ---
 
@@ -221,6 +221,13 @@ Full text: [BIBLE.md](BIBLE.md)
 ---
 
 ## Changelog
+
+### v7.2.0 — MOEX Morning Digest + Cron Scheduler
+- New feature: daily Russian stock market digest at 10:00 MSK
+- New module: `supervisor/cron.py` — persistent cron scheduler (daily jobs, timezone-aware)
+- New tool: `get_moex_digest` — fetches IMOEX, RTSI, top stocks, gainers/losers from MOEX ISS API
+- New tools: `list_cron_jobs`, `add_cron_job`, `remove_cron_job`, `enable_cron_job`, `disable_cron_job`
+- Pre-configured job: `moex_morning_digest` fires daily at 10:00 Europe/Moscow
 
 ### v7.1.0 -- Claude Code CLI as sole code editing path
 - **ANTHROPIC_API_KEY is now required** -- Claude Code CLI is the only way the agent edits its own code.

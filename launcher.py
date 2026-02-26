@@ -337,6 +337,16 @@ def reset_chat_agent():
     _w._chat_agent = None
 
 # ----------------------------
+# 6.4) Cron scheduler
+# ----------------------------
+from supervisor.cron import start_cron_thread
+
+def _cron_enqueue(task_text: str, chat_id=None) -> None:
+    enqueue_task(task_text, task_type="task", priority=5)
+
+_cron_thread = start_cron_thread(DRIVE_ROOT, _cron_enqueue, interval_sec=60)
+
+# ----------------------------
 # 7) Main loop
 # ----------------------------
 import types
