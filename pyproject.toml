@@ -3,16 +3,19 @@ name = "ouroboros"
 version = "7.2.0"
 description = "Self-creating agent"
 requires-python = ">=3.10"
-dependencies = ["pytest>=7.0"]
+dependencies = ["pytest>=7.0", "pytest-timeout>=2.0"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
 addopts = "-q --tb=short"
+timeout = 120
+timeout_method = "signal"
 markers = [
     "timeout: set test timeout in seconds (e2e tests)",
     "network: tests that make real network requests (excluded from CI/pre-push)",
+    "e2e: end-to-end integration tests (requires OPENROUTER_API_KEY)",
 ]
 
 [tool.ruff]

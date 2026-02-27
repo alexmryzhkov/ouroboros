@@ -73,6 +73,9 @@ class E2EHarness:
             ),
         )
 
+        # Allow git to operate on this directory (prevents "dubious ownership" errors in Docker)
+        subprocess.run(["git", "config", "--global", "safe.directory", str(self.repo_dir)], capture_output=True)
+
         # Init as git repo
         subprocess.run(["git", "init"], cwd=str(self.repo_dir), capture_output=True, check=True)
         subprocess.run(["git", "config", "user.email", "e2e@ouroboros.test"], cwd=str(self.repo_dir), capture_output=True, check=True)

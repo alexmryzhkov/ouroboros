@@ -7,6 +7,8 @@ import pytest
 
 from tests.e2e.harness import E2EHarness
 
+pytestmark = pytest.mark.e2e
+
 
 def pytest_collection_modifyitems(config, items):
     """Skip all E2E tests if OPENROUTER_API_KEY is not set."""
