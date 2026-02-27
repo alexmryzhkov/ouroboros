@@ -10,7 +10,10 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
 addopts = "-q --tb=short"
-markers = ["timeout: set test timeout in seconds (e2e tests)"]
+markers = [
+    "timeout: set test timeout in seconds (e2e tests)",
+    "network: tests that make real network requests (excluded from CI/pre-push)",
+]
 
 [tool.ruff]
 line-length = 120

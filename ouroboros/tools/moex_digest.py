@@ -102,6 +102,42 @@ def get_moex_indices() -> str:
     return "\n".join(lines) if lines else "⚠️ Нет данных по индексам"
 
 
+HISTORY_URL = (
+    f"{MOEX_BASE}/history/engines/stock/markets/shares/boards/TQBR/securities.json"
+    "?iss.meta=off&limit=50&sort_column=VOLRUR&sort_order=desc"
+)
+
+
+def _fetch_history_stocks(top_n: int = 50) -> List[Dict]:
+    """Fetch previous session data from MOEX ISS history endpoint.
+
+    Returns a list of dicts with keys: sid, name, close, open, volrur, chg_pct,
+    sorted by volrur descending.
+    """
+    data = _fetch_json(HISTORY_URL)
+    if not data:
+        return []
+
+    cols, rows = _parse_table(data, "history")
+    result = []
+    for row in _rows_to_dicts(cols, rows):
+        sid = row.get("SECID", "")
+        name = row.get("SHORTNAME") or sid
+        try:
+            close = float(row.get("CLOSE") or row.get("LEGALCLOSEPRICE") or 0)
+            open_ = float(row.get("OPEN") or 0)
+            volrur = float(row.get("VOLRUR") or 0)
+        except (TypeError, ValueError):
+            continue
+        if volrur <= 0 or close <= 0:
+            continue
+        chg_pct = (close - open_) / open_ * 100 if open_ > 0 else 0.0
+        result.append({"sid": sid, "name": name, "close": close, "open": open_, "volrur": volrur, "chg_pct": chg_pct})
+
+    result.sort(key=lambda x: x["volrur"], reverse=True)
+    return result[:top_n]
+
+
 def get_top_stocks(top_n: int = 10) -> str:
     """Fetch top stocks by trading volume on TQBR board."""
     url = (
@@ -147,10 +183,24 @@ def get_top_stocks(top_n: int = 10) -> str:
 
     # Sort by volume descending
     merged.sort(key=lambda x: x["volume"], reverse=True)
-    top = merged[:top_n]
 
-    if not top:
-        return "⚠️ Нет данных по акциям"
+    # Fall back to history endpoint when market is closed (no live volume)
+    if not merged:
+        hist = _fetch_history_stocks(top_n)
+        if not hist:
+            return "⚠️ Нет данных по акциям"
+        lines = ["(данные за последнюю сессию)\n**Топ по объёму торгов:**"]
+        for s in hist:
+            sign = "+" if s["chg_pct"] >= 0 else ""
+            emoji = "🟢" if s["chg_pct"] >= 0 else "🔴"
+            vol_m = s["volrur"] / 1_000_000
+            lines.append(
+                f"{emoji} **{s['sid']}** ({s['name']}): "
+                f"{s['close']:,.2f} ({sign}{s['chg_pct']:.2f}%) | Объём: {vol_m:.0f}M₽"
+            )
+        return "\n".join(lines)
+
+    top = merged[:top_n]
 
     lines = ["**Топ по объёму торгов:**"]
     for s in top:
@@ -203,8 +253,21 @@ def get_movers(top_n: int = 5) -> str:
         except (TypeError, ValueError):
             pass
 
+    # Fall back to history endpoint when market is closed (no live movers)
     if not movers:
-        return "⚠️ Нет данных по движению акций"
+        hist = _fetch_history_stocks(50)
+        if not hist:
+            return "⚠️ Нет данных по движению акций"
+        hist_sorted = sorted(hist, key=lambda x: x["chg_pct"], reverse=True)
+        gainers_h = hist_sorted[:top_n]
+        losers_h = hist_sorted[-top_n:][::-1]
+        lines = ["(данные за последнюю сессию)\n**🚀 Лидеры роста:**"]
+        for s in gainers_h:
+            lines.append(f"  🟢 {s['sid']} ({s['name']}): {s['close']:,.2f} (+{s['chg_pct']:.2f}%)")
+        lines.append("\n**📉 Лидеры падения:**")
+        for s in losers_h:
+            lines.append(f"  🔴 {s['sid']} ({s['name']}): {s['close']:,.2f} ({s['chg_pct']:.2f}%)")
+        return "\n".join(lines)
 
     movers.sort(key=lambda x: x["chg"], reverse=True)
     gainers = movers[:top_n]

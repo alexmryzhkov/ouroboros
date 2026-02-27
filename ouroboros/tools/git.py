@@ -71,7 +71,7 @@ def _run_pre_push_tests(ctx: ToolContext) -> Optional[str]:
 
     try:
         result = subprocess.run(
-            ["pytest", "tests/", "-q", "--tb=line", "--no-header"],
+            ["pytest", "tests/", "-q", "--tb=line", "--no-header", "-m", "not network"],
             cwd=ctx.repo_dir,
             capture_output=True,
             text=True,
