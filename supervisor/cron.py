@@ -37,7 +37,7 @@ def _default_jobs() -> List[Dict]:
         {
             "id": "moex_morning_digest",
             "name": "MOEX Morning Digest",
-            "schedule": {"type": "daily", "hour": 10, "minute": 0, "timezone": "Europe/Moscow"},
+            "schedule": {"type": "daily", "hour": 10, "minute": 0, "timezone": "Europe/Moscow", "window_minutes": 60},
             "task_text": (
                 "Run MOEX morning digest: call get_moex_digest tool to fetch market data, "
                 "then search for today's top financial news about Russian market (web_search), "
@@ -85,7 +85,12 @@ def _save_jobs(drive_root: Path, jobs: List[Dict]) -> None:
 # ---------------------------------------------------------------------------
 
 def _is_due(job: Dict) -> bool:
-    """Check if a job should fire right now."""
+    """Check if a job should fire right now.
+
+    Uses a catch-up window: if the system was offline at the scheduled time,
+    the job will still fire within `window_minutes` of the scheduled time
+    (default: 60 minutes), as long as it hasn't run today yet.
+    """
     if not job.get("enabled", True):
         return False
 
@@ -106,9 +111,20 @@ def _is_due(job: Dict) -> bool:
     now_tz = datetime.now(tz)
     target_hour = int(sched.get("hour", 9))
     target_minute = int(sched.get("minute", 0))
+    window_minutes = int(sched.get("window_minutes", 60))
 
-    # Check: current time is within the target minute
-    if now_tz.hour != target_hour or now_tz.minute != target_minute:
+    # Build target datetime for today in the job's timezone
+    target_today = now_tz.replace(
+        hour=target_hour, minute=target_minute, second=0, microsecond=0
+    )
+
+    # Calculate how many minutes past the target time we currently are
+    delta_seconds = (now_tz - target_today).total_seconds()
+
+    # Must be within [0, window_minutes) of the target — i.e. target has passed
+    # but catch-up window is still open. Negative delta means target is in the
+    # future (too early); delta >= window means we're past the catch-up window.
+    if not (0 <= delta_seconds < window_minutes * 60):
         return False
 
     # Check: hasn't run today yet
