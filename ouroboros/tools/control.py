@@ -106,7 +106,16 @@ def _send_owner_message(ctx: ToolContext, text: str, reason: str = "") -> str:
     Use when you have something genuinely worth saying — an insight,
     a question, a status update, or an invitation to collaborate.
     """
-    if not ctx.current_chat_id:
+    chat_id = ctx.current_chat_id
+    if not chat_id:
+        # Fallback: read owner_chat_id from state (needed for cron/background tasks)
+        try:
+            from supervisor.state import load_state
+            st = load_state()
+            chat_id = st.get("owner_chat_id") or st.get("owner_id")
+        except Exception:
+            pass
+    if not chat_id:
         return "⚠️ No active chat — cannot send proactive message."
     if not text or not text.strip():
         return "⚠️ Empty message."
@@ -114,7 +123,7 @@ def _send_owner_message(ctx: ToolContext, text: str, reason: str = "") -> str:
     from ouroboros.utils import append_jsonl
     ctx.pending_events.append({
         "type": "send_message",
-        "chat_id": ctx.current_chat_id,
+        "chat_id": chat_id,
         "text": text,
         "format": "markdown",
         "is_progress": False,
