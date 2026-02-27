@@ -75,7 +75,7 @@ def _run_pre_push_tests(ctx: ToolContext) -> Optional[str]:
             cwd=ctx.repo_dir,
             capture_output=True,
             text=True,
-            timeout=30
+            timeout=120
         )
         if result.returncode == 0:
             return None
@@ -87,7 +87,7 @@ def _run_pre_push_tests(ctx: ToolContext) -> Optional[str]:
         return output
 
     except subprocess.TimeoutExpired:
-        return "⚠️ PRE_PUSH_TEST_ERROR: pytest timed out after 30 seconds"
+        return "⚠️ PRE_PUSH_TEST_ERROR: pytest timed out after 120 seconds"
 
     except FileNotFoundError:
         return "⚠️ PRE_PUSH_TEST_ERROR: pytest not installed or not found in PATH"

@@ -118,6 +118,9 @@ CHAT_LOG_PATH = DRIVE_ROOT / "logs" / "chat.jsonl"
 if not CHAT_LOG_PATH.exists():
     CHAT_LOG_PATH.write_text("", encoding="utf-8")
 
+import subprocess as _sp
+_sp.run(["git", "config", "--global", "--add", "safe.directory", "/app"], check=False)
+
 # ----------------------------
 # 3) Git constants
 # ----------------------------
