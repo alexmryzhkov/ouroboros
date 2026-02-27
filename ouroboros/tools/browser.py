@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import base64
 import logging
+import re
 import subprocess
 import sys
 import threading
@@ -198,27 +199,85 @@ def cleanup_browser(ctx: ToolContext) -> None:
 
 
 _MARKDOWN_JS = """() => {
-    const walk = (el) => {
+    const BLOCK = new Set(['P','DIV','SECTION','ARTICLE','HEADER','FOOTER','MAIN','ASIDE','NAV']);
+    const SKIP = new Set(['SCRIPT','STYLE','NOSCRIPT','SVG','IFRAME']);
+
+    const isHidden = (el) => {
+        if (el.hidden) return true;
+        const s = window.getComputedStyle(el);
+        return s.display === 'none' || s.visibility === 'hidden';
+    };
+
+    const walk = (el, listType) => {
         let out = '';
         for (const child of el.childNodes) {
             if (child.nodeType === 3) {
-                const t = child.textContent.trim();
-                if (t) out += t + ' ';
-            } else if (child.nodeType === 1) {
-                const tag = child.tagName;
-                if (['SCRIPT','STYLE','NOSCRIPT'].includes(tag)) continue;
-                if (['H1','H2','H3','H4','H5','H6'].includes(tag))
-                    out += '\\n' + '#'.repeat(parseInt(tag[1])) + ' ';
-                if (tag === 'P' || tag === 'DIV' || tag === 'BR') out += '\\n';
-                if (tag === 'LI') out += '\\n- ';
-                if (tag === 'A') out += '[';
-                out += walk(child);
-                if (tag === 'A') out += '](' + (child.href||'') + ')';
+                out += child.textContent;
+                continue;
             }
+            if (child.nodeType !== 1) continue;
+            const tag = child.tagName;
+            if (SKIP.has(tag)) continue;
+            if (isHidden(child)) continue;
+
+            if (tag === 'BR') { out += '\\n'; continue; }
+            if (tag === 'HR') { out += '\\n---\\n'; continue; }
+
+            if (/^H[1-6]$/.test(tag)) {
+                out += '\\n' + '#'.repeat(parseInt(tag[1])) + ' ' + walk(child, null).trim() + '\\n';
+                continue;
+            }
+            if (tag === 'PRE') {
+                out += '\\n```\\n' + child.textContent + '\\n```\\n';
+                continue;
+            }
+            if (tag === 'UL') { out += walk(child, 'ul'); continue; }
+            if (tag === 'OL') { out += walk(child, 'ol'); continue; }
+            if (tag === 'LI') {
+                const marker = listType === 'ol' ? '\\n1. ' : '\\n- ';
+                out += marker + walk(child, listType).trim();
+                continue;
+            }
+            if (tag === 'BLOCKQUOTE') {
+                const inner = walk(child, null).trim();
+                out += '\\n' + inner.split('\\n').map(l => '> ' + l).join('\\n') + '\\n';
+                continue;
+            }
+            if (tag === 'TR') { out += '\\n' + walk(child, null); continue; }
+            if (tag === 'TD' || tag === 'TH') { out += ' | ' + walk(child, null); continue; }
+            if (tag === 'A') {
+                const href = child.href || '';
+                out += '[' + walk(child, null) + '](' + href + ')';
+                continue;
+            }
+            if (tag === 'IMG') {
+                out += '![' + (child.alt || '') + '](' + (child.src || '') + ')';
+                continue;
+            }
+            if (tag === 'STRONG' || tag === 'B') {
+                out += '**' + walk(child, null) + '**';
+                continue;
+            }
+            if (tag === 'EM' || tag === 'I') {
+                out += '_' + walk(child, null) + '_';
+                continue;
+            }
+            if (tag === 'CODE') {
+                out += '`' + walk(child, null) + '`';
+                continue;
+            }
+            if (BLOCK.has(tag)) {
+                out += '\\n' + walk(child, listType) + '\\n';
+                continue;
+            }
+            out += walk(child, listType);
         }
         return out;
     };
-    return walk(document.body);
+
+    let md = walk(document.body, null);
+    md = md.replace(/\\n{3,}/g, '\\n\\n').trim();
+    return md;
 }"""
 
 
@@ -236,7 +295,13 @@ def _extract_page_output(page: Any, output: str, ctx: ToolContext) -> str:
         html = page.content()
         return html[:50000] + ("... [truncated]" if len(html) > 50000 else "")
     elif output == "markdown":
-        text = page.evaluate(_MARKDOWN_JS)
+        try:
+            import markdownify as _md_lib
+            html = page.content()
+            text = _md_lib.markdownify(html, strip=["script", "style", "noscript"])
+        except ImportError:
+            text = page.evaluate(_MARKDOWN_JS)
+        text = re.sub(r'\n{3,}', '\n\n', text).strip()
         return text[:30000] + ("... [truncated]" if len(text) > 30000 else "")
     else:  # text
         text = page.inner_text("body")

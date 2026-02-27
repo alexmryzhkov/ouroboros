@@ -75,6 +75,8 @@ class E2EHarness:
 
         # Init as git repo
         subprocess.run(["git", "init"], cwd=str(self.repo_dir), capture_output=True, check=True)
+        subprocess.run(["git", "config", "user.email", "e2e@ouroboros.test"], cwd=str(self.repo_dir), capture_output=True, check=True)
+        subprocess.run(["git", "config", "user.name", "Ouroboros E2E"], cwd=str(self.repo_dir), capture_output=True, check=True)
         subprocess.run(["git", "add", "-A"], cwd=str(self.repo_dir), capture_output=True, check=True)
         subprocess.run(
             ["git", "commit", "-m", "initial"],
@@ -108,6 +110,8 @@ class E2EHarness:
         def _local_commit(ctx, **kwargs):
             msg = kwargs.get("message", kwargs.get("msg", "e2e commit"))
             subprocess.run(["git", "add", "-A"], cwd=str(ctx.repo_dir), capture_output=True)
+            subprocess.run(["git", "config", "user.email", "e2e@ouroboros.test"], cwd=str(ctx.repo_dir), capture_output=True)
+            subprocess.run(["git", "config", "user.name", "Ouroboros E2E"], cwd=str(ctx.repo_dir), capture_output=True)
             result = subprocess.run(
                 ["git", "commit", "-m", str(msg), "--allow-empty"],
                 cwd=str(ctx.repo_dir), capture_output=True, text=True,

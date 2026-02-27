@@ -85,18 +85,9 @@ def get_tradingview_ideas(top_n: int = 5, market: str = "moex") -> str:
         pos = html.find(marker)
         if pos != -1:
             start = pos + len('"ideas":')
-            depth = 0
-            end = start
-            for i, ch in enumerate(html[start:], start):
-                if ch == "{":
-                    depth += 1
-                elif ch == "}":
-                    depth -= 1
-                    if depth == 0:
-                        end = i + 1
-                        break
             try:
-                blob = json.loads(html[start:end])
+                decoder = json.JSONDecoder()
+                blob, _ = decoder.raw_decode(html, start)
                 for item in blob.get("data", {}).get("items", [])[:top_n]:
                     symbol = item.get("symbol", {}) if isinstance(item.get("symbol"), dict) else {}
                     ideas.append({
@@ -144,15 +135,13 @@ def get_tradingview_ideas(top_n: int = 5, market: str = "moex") -> str:
 
         # --- Strategy 3: __INITIAL_STATE__ or bare "ideas":[...] pattern ---
         if not ideas:
-            for pattern in [
-                r'window\.__INITIAL_STATE__\s*=\s*(\{.+?\});\s*</script>',
-                r'"ideas"\s*:\s*(\[.+?\])\s*,\s*"',
-            ]:
-                m = re.search(pattern, html, re.DOTALL)
-                if not m:
-                    continue
+            # Strategy 3a: window.__INITIAL_STATE__ — raw_decode handles { and }
+            # inside string values correctly, unlike a regex-bounded group.
+            m3a = re.search(r'window\.__INITIAL_STATE__\s*=\s*', html)
+            if m3a:
                 try:
-                    blob = json.loads(m.group(1))
+                    decoder = json.JSONDecoder()
+                    blob, _ = decoder.raw_decode(html, m3a.end())
                     entries = blob if isinstance(blob, list) else []
                     for entry in entries[:top_n]:
                         ideas.append({
@@ -165,9 +154,30 @@ def get_tradingview_ideas(top_n: int = 5, market: str = "moex") -> str:
                             "date_str": str(entry.get("published_at", ""))[:10],
                         })
                 except Exception as exc:
-                    log.debug("TradingView strategy 3 pattern failed: %s", exc)
-                if ideas:
-                    break
+                    log.debug("TradingView strategy 3a failed: %s", exc)
+
+        if not ideas:
+            # Strategy 3b: bare "ideas":[...] — the regex already extracts a
+            # bounded group, so json.loads is safe; raw_decode isn't needed
+            # because the non-greedy (\[.+?\]) terminates before the trailing ,"
+            # and can't be confused by braces inside string values at this scope.
+            m3b = re.search(r'"ideas"\s*:\s*(\[.+?\])\s*,\s*"', html, re.DOTALL)
+            if m3b:
+                try:
+                    blob = json.loads(m3b.group(1))
+                    entries = blob if isinstance(blob, list) else []
+                    for entry in entries[:top_n]:
+                        ideas.append({
+                            "name": entry.get("title") or entry.get("name", "—"),
+                            "description": "",
+                            "chart_url": url,
+                            "direction": 0,
+                            "ticker": entry.get("symbol", ""),
+                            "author": entry.get("username", ""),
+                            "date_str": str(entry.get("published_at", ""))[:10],
+                        })
+                except Exception as exc:
+                    log.debug("TradingView strategy 3b failed: %s", exc)
 
         if not ideas:
             raise ValueError("no ideas found via any parsing strategy")
