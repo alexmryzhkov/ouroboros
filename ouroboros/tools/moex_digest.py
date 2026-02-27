@@ -104,15 +104,15 @@ def get_moex_indices() -> str:
 
 HISTORY_URL = (
     f"{MOEX_BASE}/history/engines/stock/markets/shares/boards/TQBR/securities.json"
-    "?iss.meta=off&limit=50&sort_column=VOLRUR&sort_order=desc"
+    "?iss.meta=off&limit=100"
 )
 
 
 def _fetch_history_stocks(top_n: int = 50) -> List[Dict]:
     """Fetch previous session data from MOEX ISS history endpoint.
 
-    Returns a list of dicts with keys: sid, name, close, open, volrur, chg_pct,
-    sorted by volrur descending.
+    Returns a list of dicts with keys: sid, name, close, open, value, chg_pct,
+    sorted by value descending.
     """
     data = _fetch_json(HISTORY_URL)
     if not data:
@@ -126,15 +126,15 @@ def _fetch_history_stocks(top_n: int = 50) -> List[Dict]:
         try:
             close = float(row.get("CLOSE") or row.get("LEGALCLOSEPRICE") or 0)
             open_ = float(row.get("OPEN") or 0)
-            volrur = float(row.get("VOLRUR") or 0)
+            value = float(row.get("VALUE") or 0)
         except (TypeError, ValueError):
             continue
-        if volrur <= 0 or close <= 0:
+        if value <= 0 or close <= 0:
             continue
         chg_pct = (close - open_) / open_ * 100 if open_ > 0 else 0.0
-        result.append({"sid": sid, "name": name, "close": close, "open": open_, "volrur": volrur, "chg_pct": chg_pct})
+        result.append({"sid": sid, "name": name, "close": close, "open": open_, "value": value, "chg_pct": chg_pct})
 
-    result.sort(key=lambda x: x["volrur"], reverse=True)
+    result.sort(key=lambda x: x["value"], reverse=True)
     return result[:top_n]
 
 
@@ -193,7 +193,7 @@ def get_top_stocks(top_n: int = 10) -> str:
         for s in hist:
             sign = "+" if s["chg_pct"] >= 0 else ""
             emoji = "🟢" if s["chg_pct"] >= 0 else "🔴"
-            vol_m = s["volrur"] / 1_000_000
+            vol_m = s["value"] / 1_000_000
             lines.append(
                 f"{emoji} **{s['sid']}** ({s['name']}): "
                 f"{s['close']:,.2f} ({sign}{s['chg_pct']:.2f}%) | Объём: {vol_m:.0f}M₽"
