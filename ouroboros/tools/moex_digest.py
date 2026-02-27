@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
 
 from ouroboros.tools.registry import ToolContext, ToolEntry
-from ouroboros.tools.tradingview import get_tradingview_ideas
+from ouroboros.tools.tradingview import get_tradingview_ideas, format_tradingview_ideas
 
 log = logging.getLogger(__name__)
 
@@ -342,7 +342,7 @@ def _get_moex_digest(ctx: ToolContext) -> str:
         "\n## 💱 Валюты\n" + get_currency_rates(),
         "\n## 🏆 Топ акций по объёму\n" + get_top_stocks(10),
         "\n## 📊 Движение рынка\n" + get_movers(5),
-        "\n## 💡 Идеи TradingView\n" + get_tradingview_ideas(5),
+        "\n## 💡 Идеи TradingView\n" + format_tradingview_ideas(get_tradingview_ideas(5)),
     ]
 
     return "\n".join(parts)

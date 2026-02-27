@@ -1,9 +1,7 @@
-"""TradingView ideas scraper — reusable helper module."""
+"""TradingView ideas fetcher — JSON API via ru.tradingview.com."""
 from __future__ import annotations
 
-import json
 import logging
-import re
 from datetime import datetime
 from typing import Dict, List
 
@@ -14,177 +12,148 @@ log = logging.getLogger(__name__)
 _MONTHS = ("", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
            "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 
+_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/121.0.0.0 Safari/537.36"
+    ),
+    "Accept": "application/json, text/javascript, */*; q=0.01",
+    "Accept-Language": "ru-RU,ru;q=0.9,en;q=0.8",
+    "Referer": "https://ru.tradingview.com/",
+    "X-Requested-With": "XMLHttpRequest",
+}
 
-def _fmt_date(updated_at: str) -> str:
+
+def _fmt_date(ts: str) -> str:
     try:
-        dt = datetime.fromisoformat(updated_at.replace("Z", "+00:00"))
+        dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
         return f"{dt.day:02d} {_MONTHS[dt.month]} {dt.year}"
     except Exception:
-        return updated_at[:10] if updated_at else "—"
+        return ts[:10] if ts else "—"
 
 
 def _dir_str(direction) -> str:
-    if direction == 1 or str(direction).upper() == "LONG":
-        return "📈 LONG"
-    if direction == -1 or str(direction).upper() == "SHORT":
-        return "📉 SHORT"
-    return "➡️ NEUTRAL"
+    if direction == 1:
+        return "LONG"
+    if direction == 2:
+        return "SHORT"
+    return "NEUTRAL"
 
 
-def _render(items: list, top_n: int, market: str, fallback_url: str) -> str:
-    result_lines = [f"💡 Топ-{top_n} идей TradingView ({market.upper()})\n"]
-    for idx, idea in enumerate(items[:top_n], 1):
-        name = idea.get("name", "—")
+def _fetch_ideas(base_url: str, market: str) -> list:
+    url = f"{base_url}/ideas/{market}/?sort=recent&format=json"
+    resp = _requests.get(url, headers=_HEADERS, timeout=15)
+    resp.raise_for_status()
+    data = resp.json()
+    items = data["data"]["ideas"]["data"]["items"]
+    # Sort by created_at descending to ensure newest ideas first
+    # (the API's own sort may not be strictly chronological)
+    def _parse_created(item: dict):
+        ts = item.get("created_at") or ""
+        try:
+            return datetime.fromisoformat(ts.replace("Z", "+00:00"))
+        except Exception:
+            from datetime import timezone
+            return datetime.min.replace(tzinfo=timezone.utc)
+    items.sort(key=_parse_created, reverse=True)
+    return items
+
+
+def get_tradingview_ideas(top_n: int = 5, market: str = "moex") -> list[dict]:
+    """Fetch top trading ideas for a given TradingView market.
+
+    Args:
+        top_n: Number of ideas to return (default 5).
+        market: TradingView market slug (default "moex").
+
+    Returns:
+        List of dicts with keys: direction, ticker, name, description,
+        author, date, url.
+    """
+    items = None
+    for base in ("https://ru.tradingview.com", "https://www.tradingview.com"):
+        try:
+            items = _fetch_ideas(base, market)
+            log.debug("TradingView: fetched %d ideas from %s", len(items), base)
+            break
+        except Exception as exc:
+            log.warning("TradingView fetch failed from %s: %s", base, exc)
+
+    if not items:
+        return []
+
+    if len(items) < 10:
+        log.warning("TradingView: only %d ideas returned — API may have changed", len(items))
+
+    result: List[Dict] = []
+    for item in items[:top_n]:
+        symbol = item.get("symbol") or {}
+        result.append({
+            "direction": _dir_str(symbol.get("direction", 0)),
+            "ticker": symbol.get("short_name", ""),
+            "name": item.get("name", "—"),
+            "description": item.get("description", ""),
+            "author": (item.get("user") or {}).get("username", ""),
+            "date": _fmt_date(item.get("created_at", "")),
+            "url": item.get("chart_url", ""),
+        })
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Public formatter (importable without agent registry)
+# ---------------------------------------------------------------------------
+
+def format_tradingview_ideas(ideas: list[dict], top_n: int = 5, market: str = "moex") -> str:
+    """Format a list of TradingView ideas dicts into a human-readable string."""
+    if not ideas:
+        return "⚠️ TradingView: не удалось получить идеи"
+    lines = [f"💡 Топ-{top_n} идей TradingView ({market.upper()})\n"]
+    for idx, idea in enumerate(ideas, 1):
         desc = idea.get("description", "")
         if len(desc) > 100:
             desc = desc[:100] + "..."
+        dir_emoji = {"LONG": "📈", "SHORT": "📉"}.get(idea.get("direction", ""), "➡️")
         ticker_part = f" | {idea['ticker']}" if idea.get("ticker") else ""
-        result_lines.append(f"{idx}. {_dir_str(idea.get('direction', 0))}{ticker_part} — {name}")
+        lines.append(f"{idx}. {dir_emoji} {idea.get('direction', 'NEUTRAL')}{ticker_part} — {idea.get('name', '—')}")
         if desc:
-            result_lines.append(f"   {desc}")
-        result_lines.append(
-            f"   👤 {idea.get('author', '')} | "
-            f"📅 {idea.get('date_str', '—')} | "
-            f"🔗 {idea.get('chart_url', fallback_url)}"
-        )
-        result_lines.append("")
-    return "\n".join(result_lines).rstrip()
+            lines.append(f"   {desc}")
+        lines.append(f"   👤 {idea.get('author', '')} | 📅 {idea.get('date', '')} | 🔗 {idea.get('url', '')}")
+        lines.append("")
+    return "\n".join(lines).rstrip()
 
 
-def get_tradingview_ideas(top_n: int = 5, market: str = "moex") -> str:
-    """Fetch top trading ideas for a given TradingView market.
+# ---------------------------------------------------------------------------
+# Agent tool registry
+# ---------------------------------------------------------------------------
 
-    Tries three parsing strategies in order:
-      1. Embedded JSON blob  "ideas":{"data": ...} (Next.js hydration)
-      2. JSON-LD structured data  <script type="application/ld+json">
-      3. __INITIAL_STATE__ / plain "ideas":[...] regex
+try:
+    from ouroboros.tools.registry import ToolEntry
 
-    Args:
-        top_n: Number of ideas to return (default 5)
-        market: TradingView market slug (default "moex")
-    """
-    url = f"https://www.tradingview.com/ideas/{market}/?sort=recent"
-    headers = {
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/121.0.0.0 Safari/537.36"
-        ),
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "ru-RU,ru;q=0.9,en;q=0.8",
-        "Referer": "https://www.tradingview.com/",
-    }
+    def _tool_wrapper(top_n: int = 5, market: str = "moex") -> str:
+        ideas = get_tradingview_ideas(top_n=top_n, market=market)
+        return format_tradingview_ideas(ideas, top_n=top_n, market=market)
 
-    try:
-        resp = _requests.get(url, headers=headers, timeout=20)
-        html = resp.text
-        ideas: List[Dict] = []
+    def get_tools():
+        return [
+            ToolEntry("get_tradingview_ideas", {
+                "name": "get_tradingview_ideas",
+                "description": (
+                    "Fetch top trading ideas from TradingView for a given market. "
+                    "Returns formatted list with direction, ticker, author, date and chart URL. "
+                    "Default market is 'moex' (Moscow Exchange)."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "top_n": {"type": "integer", "description": "Number of ideas to return (default 5)"},
+                        "market": {"type": "string", "description": "Market slug, e.g. 'moex', 'stocks' (default 'moex')"},
+                    },
+                    "required": [],
+                },
+            }, _tool_wrapper),
+        ]
 
-        # --- Strategy 1: embedded Next.js hydration blob "ideas":{"data":...} ---
-        marker = '"ideas":{"data":'
-        pos = html.find(marker)
-        if pos != -1:
-            start = pos + len('"ideas":')
-            try:
-                decoder = json.JSONDecoder()
-                blob, _ = decoder.raw_decode(html, start)
-                for item in blob.get("data", {}).get("items", [])[:top_n]:
-                    symbol = item.get("symbol", {}) if isinstance(item.get("symbol"), dict) else {}
-                    ideas.append({
-                        "name": item.get("name", "—"),
-                        "description": item.get("description", ""),
-                        "chart_url": item.get("chart_url", url),
-                        "direction": symbol.get("direction", 0),
-                        "ticker": symbol.get("short_name", ""),
-                        "author": (item.get("user") or {}).get("username", ""),
-                        "date_str": _fmt_date(item.get("updated_at", "")),
-                    })
-            except Exception as exc:
-                log.debug("TradingView strategy 1 failed: %s", exc)
-
-        # --- Strategy 2: JSON-LD structured data ---
-        if not ideas:
-            for jld_text in re.findall(
-                r'<script[^>]+type="application/ld\+json"[^>]*>(.*?)</script>',
-                html, re.DOTALL
-            ):
-                try:
-                    data = json.loads(jld_text)
-                    entries = data if isinstance(data, list) else [data]
-                    for entry in entries:
-                        headline = entry.get("headline") or entry.get("name")
-                        if not headline:
-                            continue
-                        author_obj = entry.get("author", {})
-                        author = author_obj.get("name", "") if isinstance(author_obj, dict) else ""
-                        ideas.append({
-                            "name": headline,
-                            "description": entry.get("description", ""),
-                            "chart_url": entry.get("url", url),
-                            "direction": 0,
-                            "ticker": "",
-                            "author": author,
-                            "date_str": (entry.get("dateModified") or entry.get("datePublished", ""))[:10],
-                        })
-                        if len(ideas) >= top_n:
-                            break
-                except Exception as exc:
-                    log.debug("TradingView strategy 2 entry failed: %s", exc)
-                if len(ideas) >= top_n:
-                    break
-
-        # --- Strategy 3: __INITIAL_STATE__ or bare "ideas":[...] pattern ---
-        if not ideas:
-            # Strategy 3a: window.__INITIAL_STATE__ — raw_decode handles { and }
-            # inside string values correctly, unlike a regex-bounded group.
-            m3a = re.search(r'window\.__INITIAL_STATE__\s*=\s*', html)
-            if m3a:
-                try:
-                    decoder = json.JSONDecoder()
-                    blob, _ = decoder.raw_decode(html, m3a.end())
-                    entries = blob if isinstance(blob, list) else []
-                    for entry in entries[:top_n]:
-                        ideas.append({
-                            "name": entry.get("title") or entry.get("name", "—"),
-                            "description": "",
-                            "chart_url": url,
-                            "direction": 0,
-                            "ticker": entry.get("symbol", ""),
-                            "author": entry.get("username", ""),
-                            "date_str": str(entry.get("published_at", ""))[:10],
-                        })
-                except Exception as exc:
-                    log.debug("TradingView strategy 3a failed: %s", exc)
-
-        if not ideas:
-            # Strategy 3b: bare "ideas":[...] — use raw_decode so that braces
-            # and quotes inside string values don't confuse the parser.  We only
-            # need a regex to *locate* the opening bracket; raw_decode then
-            # consumes exactly one well-formed JSON array from that position.
-            m3b = re.search(r'"ideas"\s*:\s*\[', html)
-            if m3b:
-                try:
-                    decoder = json.JSONDecoder()
-                    blob, _ = decoder.raw_decode(html, m3b.end() - 1)  # start at '['
-                    entries = blob if isinstance(blob, list) else []
-                    for entry in entries[:top_n]:
-                        ideas.append({
-                            "name": entry.get("title") or entry.get("name", "—"),
-                            "description": "",
-                            "chart_url": url,
-                            "direction": 0,
-                            "ticker": entry.get("symbol", ""),
-                            "author": entry.get("username", ""),
-                            "date_str": str(entry.get("published_at", ""))[:10],
-                        })
-                except Exception as exc:
-                    log.debug("TradingView strategy 3b failed: %s", exc)
-
-        if not ideas:
-            raise ValueError("no ideas found via any parsing strategy")
-
-        return _render(ideas, top_n, market, url)
-
-    except Exception as e:
-        log.warning("TradingView parse error: %s", e)
-        return f"⚠️ TradingView: не удалось получить идеи ({e})"
+except ImportError:
+    pass
