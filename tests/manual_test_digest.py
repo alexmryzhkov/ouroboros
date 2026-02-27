@@ -26,6 +26,8 @@ from __future__ import annotations
 import pathlib
 import sys
 
+import pytest
+
 # Allow running as: python tests/manual_test_digest.py from any cwd
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
@@ -292,33 +294,43 @@ def check_no_error_placeholders() -> str:
 
 # ── pytest-compatible wrappers ────────────────────────────────────────────────
 
+@pytest.mark.network
 def test_fetch_json():
     check_fetch_json()
 
+@pytest.mark.network
 def test_parse_table():
     check_parse_table()
 
+@pytest.mark.network
 def test_moex_indices():
     check_moex_indices()
 
+@pytest.mark.network
 def test_currency_rates():
     check_currency_rates()
 
+@pytest.mark.network
 def test_top_stocks():
     check_top_stocks()
 
+@pytest.mark.network
 def test_movers():
     check_movers()
 
+@pytest.mark.network
 def test_tradingview_ideas():
     check_tradingview_ideas()
 
+@pytest.mark.network
 def test_tradingview_nasdaq():
     check_tradingview_ideas_nasdaq()
 
+@pytest.mark.network
 def test_full_digest():
     check_full_digest()
 
+@pytest.mark.network
 def test_no_error_placeholders():
     check_no_error_placeholders()
 
