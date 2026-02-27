@@ -157,14 +157,15 @@ def get_tradingview_ideas(top_n: int = 5, market: str = "moex") -> str:
                     log.debug("TradingView strategy 3a failed: %s", exc)
 
         if not ideas:
-            # Strategy 3b: bare "ideas":[...] — the regex already extracts a
-            # bounded group, so json.loads is safe; raw_decode isn't needed
-            # because the non-greedy (\[.+?\]) terminates before the trailing ,"
-            # and can't be confused by braces inside string values at this scope.
-            m3b = re.search(r'"ideas"\s*:\s*(\[.+?\])\s*,\s*"', html, re.DOTALL)
+            # Strategy 3b: bare "ideas":[...] — use raw_decode so that braces
+            # and quotes inside string values don't confuse the parser.  We only
+            # need a regex to *locate* the opening bracket; raw_decode then
+            # consumes exactly one well-formed JSON array from that position.
+            m3b = re.search(r'"ideas"\s*:\s*\[', html)
             if m3b:
                 try:
-                    blob = json.loads(m3b.group(1))
+                    decoder = json.JSONDecoder()
+                    blob, _ = decoder.raw_decode(html, m3b.end() - 1)  # start at '['
                     entries = blob if isinstance(blob, list) else []
                     for entry in entries[:top_n]:
                         ideas.append({
