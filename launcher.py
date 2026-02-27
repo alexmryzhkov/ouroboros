@@ -345,7 +345,8 @@ def reset_chat_agent():
 from supervisor.cron import start_cron_thread
 
 def _cron_enqueue(task_text: str, chat_id=None) -> None:
-    enqueue_task(task_text, task_type="task", priority=5)
+    import uuid
+    enqueue_task({"id": uuid.uuid4().hex[:8], "type": "task", "text": task_text, "priority": 5})
 
 _cron_thread = start_cron_thread(DRIVE_ROOT, _cron_enqueue, interval_sec=60)
 
