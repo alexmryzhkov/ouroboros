@@ -23,6 +23,18 @@ log = logging.getLogger(__name__)
 _CRON_FILE = "state/cron_jobs.json"
 _lock = threading.Lock()
 
+
+def _log_event(drive_root: Path, event_type: str, **kwargs) -> None:
+    try:
+        import datetime as _dt
+        record = {"ts": _dt.datetime.now(_dt.timezone.utc).isoformat(), "type": event_type}
+        record.update(kwargs)
+        log_path = drive_root / "logs" / "supervisor.jsonl"
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    except Exception:
+        pass  # Never let logging break the cron
+
 # Type alias for enqueue callback
 EnqueueFn = Callable[[str, Optional[int]], None]
 
@@ -124,13 +136,24 @@ def _is_due(job: Dict) -> bool:
     # Must be within [0, window_minutes) of the target — i.e. target has passed
     # but catch-up window is still open. Negative delta means target is in the
     # future (too early); delta >= window means we're past the catch-up window.
-    if not (0 <= delta_seconds < window_minutes * 60):
+    window_ok = 0 <= delta_seconds < window_minutes * 60
+    log.debug(
+        "cron _is_due check: job=%s now=%s target=%s delta_seconds=%.1f window_minutes=%d window_ok=%s",
+        job.get("id", "unknown"), now_tz.isoformat(), target_today.isoformat(),
+        delta_seconds, window_minutes, window_ok,
+    )
+    if not window_ok:
         return False
 
     # Check: hasn't run today yet
     today_str = now_tz.date().isoformat()
     last_run = job.get("last_run_date", "")
-    if last_run == today_str:
+    last_run_ok = last_run != today_str
+    log.debug(
+        "cron _is_due last_run check: job=%s today=%s last_run_date=%r last_run_ok=%s",
+        job.get("id", "unknown"), today_str, last_run, last_run_ok,
+    )
+    if not last_run_ok:
         return False
 
     return True
@@ -149,13 +172,17 @@ def check_and_fire(drive_root: Path, enqueue_fn: EnqueueFn) -> List[str]:
     fired = []
     with _lock:
         jobs = _load_jobs(drive_root)
+        _log_event(drive_root, "cron_check", job_count=len(jobs))
+        log.debug("cron check_and_fire: checking %d jobs", len(jobs))
         modified = False
 
         for job in jobs:
             if _is_due(job):
                 job_id = job.get("id", "unknown")
+                job_name = job.get("name", "")
                 task_text = job.get("task_text", "")
-                log.info("Cron job firing: %s (%s)", job_id, job.get("name", ""))
+                log.info("Cron job firing: %s (%s)", job_id, job_name)
+                _log_event(drive_root, "cron_job_due", job_id=job_id, job_name=job_name)
 
                 try:
                     enqueue_fn(task_text, None)
@@ -170,8 +197,10 @@ def check_and_fire(drive_root: Path, enqueue_fn: EnqueueFn) -> List[str]:
                     modified = True
                     fired.append(job_id)
                     log.info("Cron job enqueued: %s", job_id)
-                except Exception:
+                    _log_event(drive_root, "cron_job_fired", job_id=job_id, job_name=job_name)
+                except Exception as e:
                     log.error("Failed to enqueue cron job %s", job_id, exc_info=True)
+                    _log_event(drive_root, "cron_job_error", job_id=job_id, error=str(e))
 
         if modified:
             _save_jobs(drive_root, jobs)
@@ -232,18 +261,21 @@ def set_job_enabled(drive_root: Path, job_id: str, enabled: bool) -> str:
 
 def start_cron_thread(drive_root: Path, enqueue_fn: EnqueueFn, interval_sec: int = 60) -> threading.Thread:
     """Start a daemon thread that checks cron jobs every interval_sec seconds."""
-    def _loop():
+    def _loop(drive_root: Path):
+        import time
+        import traceback
         log.info("Cron thread started (interval=%ds)", interval_sec)
         while True:
             try:
                 fired = check_and_fire(drive_root, enqueue_fn)
                 if fired:
                     log.info("Cron fired jobs: %s", fired)
-            except Exception:
-                log.error("Cron check_and_fire error", exc_info=True)
-            import time
+            except Exception as e:
+                tb = traceback.format_exc()
+                log.error("Cron check_and_fire error: %s\n%s", e, tb)
+                _log_event(drive_root, "cron_loop_error", error=str(e), traceback=tb)
             time.sleep(interval_sec)
 
-    t = threading.Thread(target=_loop, daemon=True, name="cron-scheduler")
+    t = threading.Thread(target=_loop, args=(drive_root,), daemon=True, name="cron-scheduler")
     t.start()
     return t
