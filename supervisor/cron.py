@@ -49,7 +49,7 @@ def _default_jobs() -> List[Dict]:
         {
             "id": "moex_morning_digest",
             "name": "MOEX Morning Digest",
-            "schedule": {"type": "daily", "hour": 10, "minute": 0, "timezone": "Europe/Moscow", "window_minutes": 60},
+            "schedule": {"type": "daily", "hour": 10, "minute": 0, "timezone": "Europe/Moscow", "window_minutes": 60, "skip_weekdays": [6]},
             "task_text": (
                 "Run MOEX morning digest: call get_moex_digest tool to fetch market data, "
                 "then search for today's top financial news about Russian market (web_search), "
@@ -102,6 +102,13 @@ def _is_due(job: Dict) -> bool:
     Uses a catch-up window: if the system was offline at the scheduled time,
     the job will still fire within `window_minutes` of the scheduled time
     (default: 60 minutes), as long as it hasn't run today yet.
+
+    Weekday filtering (optional schedule keys):
+    - ``skip_weekdays``: list of Python weekday numbers (0=Monday, 6=Sunday)
+      on which the job will NOT fire.
+    - ``only_weekdays``: list of weekday numbers on which the job SHOULD fire;
+      if present and the current weekday is not in the list the job is skipped.
+    If neither key is present the job fires on all days (existing behaviour).
     """
     if not job.get("enabled", True):
         return False
@@ -143,6 +150,25 @@ def _is_due(job: Dict) -> bool:
         delta_seconds, window_minutes, window_ok,
     )
     if not window_ok:
+        return False
+
+    # Weekday filtering
+    weekday = now_tz.weekday()  # 0=Monday, 6=Sunday
+    skip_weekdays = sched.get("skip_weekdays", [])
+    only_weekdays = sched.get("only_weekdays", [])
+
+    if skip_weekdays and weekday in skip_weekdays:
+        log.debug(
+            "cron _is_due: job=%s skipped — weekday %d in skip_weekdays %s",
+            job.get("id", "unknown"), weekday, skip_weekdays,
+        )
+        return False
+
+    if only_weekdays and weekday not in only_weekdays:
+        log.debug(
+            "cron _is_due: job=%s skipped — weekday %d not in only_weekdays %s",
+            job.get("id", "unknown"), weekday, only_weekdays,
+        )
         return False
 
     # Check: hasn't run today yet
