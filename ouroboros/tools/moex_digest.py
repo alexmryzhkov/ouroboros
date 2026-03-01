@@ -332,6 +332,20 @@ def get_currency_rates() -> str:
     return "\n".join(lines) if lines else "⚠️ Нет данных по валютам"
 
 
+def _get_last_trading_day() -> Optional[str]:
+    """Query MOEX ISS history to find the most recent trading day."""
+    dates_url = (
+        f"{MOEX_BASE}/history/engines/stock/markets/shares/boards/TQBR/dates.json"
+        "?iss.meta=off"
+    )
+    data = _fetch_json(dates_url)
+    if data:
+        _, date_rows = _parse_table(data, "dates")
+        if date_rows:
+            return date_rows[0][1]  # "till" column = last date with data
+    return None
+
+
 def is_trading_day(date_str: str = None) -> dict:
     """Check if a given date (YYYY-MM-DD) is a MOEX trading day."""
     try:
@@ -349,11 +363,16 @@ def is_trading_day(date_str: str = None) -> dict:
     weekday = d.weekday()
     if weekday >= 5:
         day_name = "суббота" if weekday == 5 else "воскресенье"
+        # Find last actual trading day from MOEX history dates
+        last_trading = _get_last_trading_day()
+        reason = f"Выходной день ({day_name}) — MOEX не торгует"
+        if last_trading:
+            reason += f". Последний торговый день: {last_trading}"
         return {
             "date": date_str,
             "is_trading": False,
-            "reason": f"Выходной день ({day_name}) — MOEX не торгует",
-            "last_trading_day": None,
+            "reason": reason,
+            "last_trading_day": last_trading,
         }
 
     url = (
@@ -379,16 +398,7 @@ def is_trading_day(date_str: str = None) -> dict:
         }
 
     # Non-trading day: find last actual trading day
-    dates_url = (
-        f"{MOEX_BASE}/history/engines/stock/markets/shares/boards/TQBR/dates.json"
-        "?iss.meta=off"
-    )
-    dates_data = _fetch_json(dates_url)
-    last_trading = None
-    if dates_data:
-        _, date_rows = _parse_table(dates_data, "dates")
-        if date_rows:
-            last_trading = date_rows[0][1]  # "till" column
+    last_trading = _get_last_trading_day()
 
     reason = f"Не торговый день (выходной или праздник) — данных за {date_str} нет на MOEX"
     if last_trading:
@@ -429,7 +439,15 @@ def _get_moex_digest(ctx: ToolContext) -> str:
             f"{trading_info['reason']}\n"
         )
         if last_td:
-            holiday_notice += f"\nПоказаны данные за последнюю торговую сессию ({last_td}):\n"
+            # Format YYYY-MM-DD → DD.MM.YYYY
+            try:
+                from datetime import date as _date2
+                last_td_fmt = _date2.fromisoformat(last_td).strftime("%d.%m.%Y")
+            except Exception:
+                last_td_fmt = last_td
+            holiday_notice += f"\n📅 Данные за последнюю торговую сессию: **{last_td_fmt}**\n"
+        else:
+            holiday_notice += "\n📅 Данные за последнюю доступную сессию:\n"
 
         parts = [
             header,
