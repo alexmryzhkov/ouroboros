@@ -332,18 +332,123 @@ def get_currency_rates() -> str:
     return "\n".join(lines) if lines else "⚠️ Нет данных по валютам"
 
 
-def _get_moex_digest(ctx: ToolContext) -> str:
-    """Fetch full MOEX morning digest: indices, currencies, top stocks, movers, ideas."""
-    now_msk = datetime.now(timezone.utc).strftime("%d.%m.%Y %H:%M UTC")
+def is_trading_day(date_str: str = None) -> dict:
+    """Check if a given date (YYYY-MM-DD) is a MOEX trading day."""
+    try:
+        from zoneinfo import ZoneInfo
+    except ImportError:
+        from backports.zoneinfo import ZoneInfo  # type: ignore
 
-    parts = [
-        f"# 📊 Дайджест MOEX — {now_msk}\n",
-        "## 📈 Индексы\n" + get_moex_indices(),
-        "\n## 💱 Валюты\n" + get_currency_rates(),
-        "\n## 🏆 Топ акций по объёму\n" + get_top_stocks(10),
-        "\n## 📊 Движение рынка\n" + get_movers(5),
-        "\n## 💡 Идеи TradingView\n" + format_tradingview_ideas(get_tradingview_ideas(5)),
-    ]
+    from datetime import date as _date
+
+    tz_msk = ZoneInfo("Europe/Moscow")
+    if date_str is None:
+        date_str = datetime.now(tz_msk).date().isoformat()
+
+    d = _date.fromisoformat(date_str)
+    weekday = d.weekday()
+    if weekday >= 5:
+        day_name = "суббота" if weekday == 5 else "воскресенье"
+        return {
+            "date": date_str,
+            "is_trading": False,
+            "reason": f"Выходной день ({day_name}) — MOEX не торгует",
+            "last_trading_day": None,
+        }
+
+    url = (
+        f"{MOEX_BASE}/history/engines/stock/markets/shares/boards/TQBR/securities.json"
+        f"?date={date_str}&iss.meta=off&limit=1&iss.only=history"
+    )
+    data = _fetch_json(url)
+    if data is None:
+        return {
+            "date": date_str,
+            "is_trading": True,
+            "reason": "Не удалось получить данные от MOEX ISS (API недоступен) — предполагаем торговый день",
+            "last_trading_day": date_str,
+        }
+
+    _, rows = _parse_table(data, "history")
+    if rows:
+        return {
+            "date": date_str,
+            "is_trading": True,
+            "reason": "Торговый день — данные за эту дату есть на MOEX",
+            "last_trading_day": date_str,
+        }
+
+    # Non-trading day: find last actual trading day
+    dates_url = (
+        f"{MOEX_BASE}/history/engines/stock/markets/shares/boards/TQBR/dates.json"
+        "?iss.meta=off"
+    )
+    dates_data = _fetch_json(dates_url)
+    last_trading = None
+    if dates_data:
+        _, date_rows = _parse_table(dates_data, "dates")
+        if date_rows:
+            last_trading = date_rows[0][1]  # "till" column
+
+    reason = f"Не торговый день (выходной или праздник) — данных за {date_str} нет на MOEX"
+    if last_trading:
+        reason += f". Последний торговый день: {last_trading}"
+
+    return {
+        "date": date_str,
+        "is_trading": False,
+        "reason": reason,
+        "last_trading_day": last_trading,
+    }
+
+
+def _get_moex_digest(ctx: ToolContext) -> str:
+    """Fetch full MOEX morning digest: indices, currencies, top stocks, movers, ideas.
+
+    Includes holiday/non-trading-day awareness: if today is not a trading day,
+    the digest will say so clearly and show data from the last trading session.
+    """
+    try:
+        from zoneinfo import ZoneInfo
+    except ImportError:
+        from backports.zoneinfo import ZoneInfo  # type: ignore
+
+    tz_msk = ZoneInfo("Europe/Moscow")
+    now_msk = datetime.now(tz_msk)
+    today_str = now_msk.date().isoformat()
+    now_formatted = now_msk.strftime("%d.%m.%Y %H:%M МСК")
+
+    trading_info = is_trading_day(today_str)
+    is_trading = trading_info["is_trading"]
+
+    if not is_trading:
+        last_td = trading_info.get("last_trading_day")
+        header = f"# 📊 Дайджест MOEX — {now_formatted}\n"
+        holiday_notice = (
+            f"\n⛔ **Сегодня не торговый день**\n"
+            f"{trading_info['reason']}\n"
+        )
+        if last_td:
+            holiday_notice += f"\nПоказаны данные за последнюю торговую сессию ({last_td}):\n"
+
+        parts = [
+            header,
+            holiday_notice,
+            "## 📈 Индексы\n" + get_moex_indices(),
+            "\n## 💱 Валюты\n" + get_currency_rates(),
+            "\n## 🏆 Топ акций по объёму\n" + get_top_stocks(10),
+            "\n## 📊 Движение рынка\n" + get_movers(5),
+            "\n## 💡 Идеи TradingView\n" + format_tradingview_ideas(get_tradingview_ideas(5)),
+        ]
+    else:
+        parts = [
+            f"# 📊 Дайджест MOEX — {now_formatted}\n",
+            "## 📈 Индексы\n" + get_moex_indices(),
+            "\n## 💱 Валюты\n" + get_currency_rates(),
+            "\n## 🏆 Топ акций по объёму\n" + get_top_stocks(10),
+            "\n## 📊 Движение рынка\n" + get_movers(5),
+            "\n## 💡 Идеи TradingView\n" + format_tradingview_ideas(get_tradingview_ideas(5)),
+        ]
 
     return "\n".join(parts)
 
@@ -358,8 +463,28 @@ def get_tools() -> List[ToolEntry]:
                 "currency rates (USD/RUB, CNY/RUB), "
                 "top stocks by volume, top gainers/losers, "
                 "and top TradingView ideas for MOEX. "
+                "Includes holiday awareness: if today is not a trading day, "
+                "the digest will clearly state that and show last-session data. "
                 "Use this to generate the morning market briefing."
             ),
             "parameters": {"type": "object", "properties": {}, "required": []},
         }, _get_moex_digest),
+        ToolEntry("check_moex_trading_day", {
+            "name": "check_moex_trading_day",
+            "description": (
+                "Check if a given date is a MOEX trading day. "
+                "Returns is_trading (bool), reason, and last_trading_day. "
+                "Uses MOEX ISS history API — reliable for past dates and same-day check."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "date": {
+                        "type": "string",
+                        "description": "ISO date string YYYY-MM-DD. Defaults to today (Moscow time).",
+                    }
+                },
+                "required": [],
+            },
+        }, lambda ctx: is_trading_day(ctx.params.get("date"))),
     ]

@@ -59,7 +59,8 @@ def _default_jobs() -> List[Dict]:
                 "3) Top gainers and losers, "
                 "4) Key news headlines (3-5 items), "
                 "5) Any important economic events today (ЦБ РФ, дивиденды, отчёты). "
-                "Send the complete digest to the owner via send_owner_message."
+                "Send the complete digest to the owner via send_owner_message. "
+                "On non-trading days (holidays), still send the digest but note it's a non-trading day with last session data."
             ),
             "enabled": True,
             "last_run_date": "",

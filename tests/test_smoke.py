@@ -121,6 +121,7 @@ EXPECTED_TOOLS = [
     # MOEX market digest
     "get_moex_digest",
     "get_tradingview_ideas",
+    "check_moex_trading_day",
     # Cron scheduler
     "list_cron_jobs", "add_cron_job", "remove_cron_job", "enable_cron_job", "disable_cron_job",
 ]
