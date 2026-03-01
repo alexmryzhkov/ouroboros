@@ -332,8 +332,58 @@ def get_currency_rates() -> str:
     return "\n".join(lines) if lines else "⚠️ Нет данных по валютам"
 
 
+def _get_market_session_date() -> Optional[str]:
+    """Get the date of the most recent MOEX trading session from IMOEX live data.
+
+    Uses the TRADE_SESSION_DATE field from IMOEX marketdata — this is the date
+    of the last data point MOEX has, updated in real-time during trading.
+    Returns YYYY-MM-DD string or None on error.
+    """
+    url = (
+        f"{MOEX_BASE}/engines/stock/markets/index/boards/SNDX/securities.json"
+        "?securities=IMOEX&iss.meta=off&iss.only=marketdata"
+    )
+    data = _fetch_json(url)
+    if not data:
+        return None
+    md_cols, md_rows = _parse_table(data, "marketdata")
+    if not md_rows:
+        return None
+    row = dict(zip(md_cols, md_rows[0]))
+    return row.get("TRADE_SESSION_DATE")  # e.g. "2026-02-27"
+
+
+def _get_live_trading_status() -> Optional[str]:
+    """Get TRADINGSTATUS for SBER on TQBR board.
+
+    Returns the raw TRADINGSTATUS string:
+      'T' = security is listed as tradeable (most common)
+      'N' = not trading (suspended or non-trading day)
+      None = could not determine
+
+    Note: 'T' does NOT mean the market is currently open — it means the
+    security is in a tradeable state. Use TRADE_SESSION_DATE for date checks.
+    """
+    url = (
+        f"{MOEX_BASE}/engines/stock/markets/shares/boards/TQBR/securities.json"
+        "?securities=SBER&iss.meta=off&iss.only=marketdata"
+    )
+    data = _fetch_json(url)
+    if not data:
+        return None
+    md_cols, md_rows = _parse_table(data, "marketdata")
+    if not md_rows:
+        return None
+    row = dict(zip(md_cols, md_rows[0]))
+    return row.get("TRADINGSTATUS")
+
+
 def _get_last_trading_day() -> Optional[str]:
-    """Query MOEX ISS history to find the most recent trading day."""
+    """Query MOEX ISS history to find the most recent completed trading day.
+
+    Uses the /history/.../dates.json endpoint — returns the 'till' field
+    which is the last date with published trading data.
+    """
     dates_url = (
         f"{MOEX_BASE}/history/engines/stock/markets/shares/boards/TQBR/dates.json"
         "?iss.meta=off"
@@ -347,7 +397,14 @@ def _get_last_trading_day() -> Optional[str]:
 
 
 def is_trading_day(date_str: str = None) -> dict:
-    """Check if a given date (YYYY-MM-DD) is a MOEX trading day."""
+    """Check if a given date (YYYY-MM-DD) is a MOEX trading day.
+
+    Uses a two-stage detection:
+    1. Fast path: weekend check (no API call needed)
+    2. Real-time check: compare TRADE_SESSION_DATE from IMOEX live data
+       with the requested date — this works correctly during trading hours
+       (unlike the history endpoint which only updates end-of-day).
+    """
     try:
         from zoneinfo import ZoneInfo
     except ImportError:
@@ -361,9 +418,10 @@ def is_trading_day(date_str: str = None) -> dict:
 
     d = _date.fromisoformat(date_str)
     weekday = d.weekday()
+
+    # Fast path: weekends are never trading days on MOEX
     if weekday >= 5:
         day_name = "суббота" if weekday == 5 else "воскресенье"
-        # Find last actual trading day from MOEX history dates
         last_trading = _get_last_trading_day()
         reason = f"Выходной день ({day_name}) — MOEX не торгует"
         if last_trading:
@@ -375,6 +433,32 @@ def is_trading_day(date_str: str = None) -> dict:
             "last_trading_day": last_trading,
         }
 
+    # Real-time check: what date does MOEX live data show?
+    session_date = _get_market_session_date()
+
+    if session_date is not None:
+        if session_date == date_str:
+            # MOEX live data is for today → market has traded (or is trading) today
+            return {
+                "date": date_str,
+                "is_trading": True,
+                "reason": f"Торговый день — MOEX ведёт данные за {date_str} (TRADE_SESSION_DATE={session_date})",
+                "last_trading_day": date_str,
+            }
+        else:
+            # MOEX live data is for a different (earlier) date → today is a holiday
+            return {
+                "date": date_str,
+                "is_trading": False,
+                "reason": (
+                    f"Не торговый день (праздник) — "
+                    f"последние данные MOEX за {session_date}, не за сегодня ({date_str})"
+                ),
+                "last_trading_day": session_date,
+            }
+
+    # Fallback: if live check fails, try history endpoint
+    log.warning("is_trading_day: TRADE_SESSION_DATE unavailable, falling back to history check")
     url = (
         f"{MOEX_BASE}/history/engines/stock/markets/shares/boards/TQBR/securities.json"
         f"?date={date_str}&iss.meta=off&limit=1&iss.only=history"
@@ -393,14 +477,12 @@ def is_trading_day(date_str: str = None) -> dict:
         return {
             "date": date_str,
             "is_trading": True,
-            "reason": "Торговый день — данные за эту дату есть на MOEX",
+            "reason": "Торговый день — данные за эту дату есть на MOEX (history fallback)",
             "last_trading_day": date_str,
         }
 
-    # Non-trading day: find last actual trading day
     last_trading = _get_last_trading_day()
-
-    reason = f"Не торговый день (выходной или праздник) — данных за {date_str} нет на MOEX"
+    reason = f"Не торговый день (выходной или праздник) — данных за {date_str} нет на MOEX (history fallback)"
     if last_trading:
         reason += f". Последний торговый день: {last_trading}"
 
