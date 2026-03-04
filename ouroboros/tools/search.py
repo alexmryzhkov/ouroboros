@@ -14,8 +14,9 @@ def _web_search(ctx: ToolContext, query: str) -> str:
     if not api_key:
         return json.dumps({"error": "OPENAI_API_KEY not set; web_search unavailable."})
     try:
+        import openai
         from openai import OpenAI
-        client = OpenAI(api_key=api_key)
+        client = OpenAI(api_key=api_key, timeout=30.0)
         resp = client.responses.create(
             model=os.environ.get("OUROBOROS_WEBSEARCH_MODEL", "gpt-5"),
             tools=[{"type": "web_search"}],
@@ -30,6 +31,10 @@ def _web_search(ctx: ToolContext, query: str) -> str:
                     if block.get("type") in ("output_text", "text"):
                         text += block.get("text", "")
         return json.dumps({"answer": text or "(no answer)"}, ensure_ascii=False, indent=2)
+    except openai.APITimeoutError:
+        return json.dumps({"error": "web_search timed out after 30 seconds."}, ensure_ascii=False)
+    except openai.APIConnectionError as e:
+        return json.dumps({"error": f"web_search connection error: {e}"}, ensure_ascii=False)
     except Exception as e:
         return json.dumps({"error": repr(e)}, ensure_ascii=False)
 
