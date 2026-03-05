@@ -38,6 +38,18 @@ def _log_event(drive_root: Path, event_type: str, **kwargs) -> None:
 # Type alias for enqueue callback
 EnqueueFn = Callable[[str, Optional[int]], None]
 
+# ---------------------------------------------------------------------------
+# Direct handler registry
+# ---------------------------------------------------------------------------
+
+_DIRECT_HANDLERS: Dict[str, Callable] = {}
+
+
+def register_direct_handler(name: str, fn: Callable) -> None:
+    """Register a callable as a direct cron handler (no LLM, no worker queue)."""
+    _DIRECT_HANDLERS[name] = fn
+    log.info("Registered direct cron handler: %s", name)
+
 
 # ---------------------------------------------------------------------------
 # Schema helpers
@@ -49,19 +61,9 @@ def _default_jobs() -> List[Dict]:
         {
             "id": "moex_morning_digest",
             "name": "MOEX Morning Digest",
-            "schedule": {"type": "daily", "hour": 10, "minute": 0, "timezone": "Europe/Moscow", "window_minutes": 60, "skip_weekdays": [6]},
-            "task_text": (
-                "Run MOEX morning digest: call get_moex_digest tool to fetch market data, "
-                "then search for today's top financial news about Russian market (web_search), "
-                "then compose a complete morning briefing with: "
-                "1) Market indices (IMOEX, RTSI), "
-                "2) Top stocks by volume with % changes, "
-                "3) Top gainers and losers, "
-                "4) Key news headlines (3-5 items), "
-                "5) Any important economic events today (ЦБ РФ, дивиденды, отчёты). "
-                "Send the complete digest to the owner via send_owner_message. "
-                "On non-trading days (holidays), still send the digest but note it's a non-trading day with last session data."
-            ),
+            "schedule": {"type": "daily", "hour": 10, "minute": 0, "timezone": "Europe/Moscow", "window_minutes": 60, "skip_weekdays": [5, 6]},
+            "task_type": "direct",
+            "handler": "moex_morning_digest",
             "enabled": True,
             "last_run_date": "",
         }
@@ -212,7 +214,19 @@ def check_and_fire(drive_root: Path, enqueue_fn: EnqueueFn) -> List[str]:
                 _log_event(drive_root, "cron_job_due", job_id=job_id, job_name=job_name)
 
                 try:
-                    enqueue_fn(task_text, None)
+                    if job.get("task_type") == "direct":
+                        handler_name = job.get("handler", "")
+                        handler_fn = _DIRECT_HANDLERS.get(handler_name)
+                        if handler_fn is None:
+                            raise ValueError(f"Direct handler '{handler_name}' not registered")
+                        t = threading.Thread(target=handler_fn, daemon=True, name=f"direct-{job_id}")
+                        t.start()
+                        log.info("Cron direct job dispatched: %s (handler=%s)", job_id, handler_name)
+                        _log_event(drive_root, "cron_job_fired", job_id=job_id, job_name=job_name, mode="direct", handler=handler_name)
+                    else:
+                        enqueue_fn(task_text, None)
+                        log.info("Cron job enqueued: %s", job_id)
+                        _log_event(drive_root, "cron_job_fired", job_id=job_id, job_name=job_name, mode="enqueue")
 
                     # Update last_run_date
                     tz_name = job.get("schedule", {}).get("timezone", "UTC")
@@ -223,10 +237,8 @@ def check_and_fire(drive_root: Path, enqueue_fn: EnqueueFn) -> List[str]:
                     job["last_run_date"] = datetime.now(tz).date().isoformat()
                     modified = True
                     fired.append(job_id)
-                    log.info("Cron job enqueued: %s", job_id)
-                    _log_event(drive_root, "cron_job_fired", job_id=job_id, job_name=job_name)
                 except Exception as e:
-                    log.error("Failed to enqueue cron job %s", job_id, exc_info=True)
+                    log.error("Failed to fire cron job %s", job_id, exc_info=True)
                     _log_event(drive_root, "cron_job_error", job_id=job_id, error=str(e))
 
         if modified:

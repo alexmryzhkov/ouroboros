@@ -342,12 +342,15 @@ def reset_chat_agent():
 # ----------------------------
 # 6.4) Cron scheduler
 # ----------------------------
-from supervisor.cron import start_cron_thread
+from supervisor.cron import start_cron_thread, register_direct_handler
+from ouroboros.tools.moex_digest import send_moex_digest_direct
+import functools
 
 def _cron_enqueue(task_text: str, chat_id=None) -> None:
     import uuid
     enqueue_task({"id": uuid.uuid4().hex[:8], "type": "task", "text": task_text, "priority": 5})
 
+register_direct_handler("moex_morning_digest", functools.partial(send_moex_digest_direct, str(DRIVE_ROOT)))
 _cron_thread = start_cron_thread(DRIVE_ROOT, _cron_enqueue, interval_sec=60)
 
 # ----------------------------
