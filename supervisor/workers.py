@@ -151,7 +151,12 @@ def handle_chat_direct(chat_id: int, text: str, image_data: Optional[Union[Tuple
                     task["text"] = image_data[2]
         # Fallback for truly empty messages
         if not task["text"]:
-            task["text"] = "(image attached)" if image_data else ""
+            if image_data:
+                task["text"] = "(image attached)"
+            else:
+                # Empty text with no image — nothing to process, skip silently
+                log.info("Skipping empty task (no text, no image): task_id=%s", task.get("id"))
+                return
         events = agent.handle_task(task)
         for e in events:
             get_event_q().put(e)

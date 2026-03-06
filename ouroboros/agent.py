@@ -402,6 +402,13 @@ class OuroborosAgent:
         self._current_task_type = str(task.get("type") or "")
 
         drive_logs = self.env.drive_path("logs")
+
+        # Guard: skip tasks with empty text to avoid infinite LLM loops
+        if not task.get("text", "").strip():
+            log.warning("handle_task: skipping task %s — empty text", task.get("id"))
+            self._busy = False
+            return []
+
         heartbeat_stop = self._start_task_heartbeat_loop(str(task.get("id") or ""))
 
         try:

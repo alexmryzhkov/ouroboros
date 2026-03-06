@@ -115,6 +115,7 @@ class LLMClient:
             self._client = OpenAI(
                 base_url=self._base_url,
                 api_key=self._api_key,
+                timeout=120.0,
                 default_headers={
                     "HTTP-Referer": "https://github.com/jkee/ouroboros",
                     "X-Title": "Ouroboros",
