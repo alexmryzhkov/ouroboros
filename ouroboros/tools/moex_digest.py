@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 import urllib.request
 import urllib.error
 from datetime import datetime, timezone
@@ -16,17 +17,42 @@ log = logging.getLogger(__name__)
 
 MOEX_BASE = "https://iss.moex.com/iss"
 TIMEOUT = 15  # seconds
+TQBR_LIVE_URL = (
+    f"{MOEX_BASE}/engines/stock/markets/shares/boards/TQBR/securities.json"
+    "?iss.meta=off&iss.only=securities,marketdata"
+)
+
+_cache: Dict[str, Tuple[float, Optional[Dict]]] = {}
+_CACHE_TTL = 60.0  # seconds
 
 
 def _fetch_json(url: str) -> Optional[Dict]:
-    """Fetch JSON from MOEX ISS API. Returns None on error."""
-    try:
-        req = urllib.request.Request(url, headers={"User-Agent": "Ouroboros/1.0"})
-        with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
-            return json.loads(resp.read().decode("utf-8"))
-    except Exception as e:
-        log.warning("MOEX API fetch error: %s — %s", url, e)
-        return None
+    """Fetch JSON from MOEX ISS API. Returns None on error. Cached for 60s, one retry."""
+    now = time.monotonic()
+    cached = _cache.get(url)
+    if cached is not None and (now - cached[0]) < _CACHE_TTL:
+        return cached[1]
+
+    for attempt in range(2):
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "Ouroboros/1.0"})
+            with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
+                result = json.loads(resp.read().decode("utf-8"))
+            _cache[url] = (time.monotonic(), result)
+            return result
+        except (urllib.error.URLError, ConnectionError) as e:
+            if attempt == 0:
+                log.warning("MOEX API fetch error (retrying): %s — %s", url, e)
+                time.sleep(2)
+            else:
+                log.warning("MOEX API fetch error: %s — %s", url, e)
+                _cache[url] = (time.monotonic(), None)
+                return None
+        except Exception as e:
+            log.warning("MOEX API fetch error: %s — %s", url, e)
+            _cache[url] = (time.monotonic(), None)
+            return None
+    return None
 
 
 def _parse_table(data: Dict, table_name: str) -> Tuple[List[str], List[List]]:
@@ -140,11 +166,7 @@ def _fetch_history_stocks(top_n: int = 50) -> List[Dict]:
 
 def get_top_stocks(top_n: int = 10) -> str:
     """Fetch top stocks by trading volume on TQBR board."""
-    url = (
-        f"{MOEX_BASE}/engines/stock/markets/shares/boards/TQBR/securities.json"
-        "?iss.meta=off&iss.only=securities,marketdata"
-    )
-    data = _fetch_json(url)
+    data = _fetch_json(TQBR_LIVE_URL)
     if not data:
         return "⚠️ Не удалось получить данные по акциям"
 
@@ -224,11 +246,7 @@ def get_top_stocks(top_n: int = 10) -> str:
 
 def get_movers(top_n: int = 5) -> str:
     """Get top gainers and losers from TQBR."""
-    url = (
-        f"{MOEX_BASE}/engines/stock/markets/shares/boards/TQBR/securities.json"
-        "?iss.meta=off&iss.only=securities,marketdata"
-    )
-    data = _fetch_json(url)
+    data = _fetch_json(TQBR_LIVE_URL)
     if not data:
         return "⚠️ Не удалось получить данные по движению акций"
 
@@ -509,41 +527,31 @@ def build_moex_digest_text() -> str:
     trading_info = is_trading_day(today_str)
     is_trading = trading_info["is_trading"]
 
+    header = f"# 📊 Дайджест MOEX — {now_formatted}\n"
+    notice = ""
     if not is_trading:
         last_td = trading_info.get("last_trading_day")
-        header = f"# 📊 Дайджест MOEX — {now_formatted}\n"
-        holiday_notice = (
-            f"\n⛔ **Сегодня не торговый день**\n"
-            f"{trading_info['reason']}\n"
-        )
+        notice = f"\n⛔ **Сегодня не торговый день**\n{trading_info['reason']}\n"
         if last_td:
             try:
                 from datetime import date as _date2
                 last_td_fmt = _date2.fromisoformat(last_td).strftime("%d.%m.%Y")
             except Exception:
                 last_td_fmt = last_td
-            holiday_notice += f"\n📅 Данные за последнюю торговую сессию: **{last_td_fmt}**\n"
+            notice += f"\n📅 Данные за последнюю торговую сессию: **{last_td_fmt}**\n"
         else:
-            holiday_notice += "\n📅 Данные за последнюю доступную сессию:\n"
+            notice += "\n📅 Данные за последнюю доступную сессию:\n"
 
-        parts = [
-            header,
-            holiday_notice,
-            "## 📈 Индексы\n" + get_moex_indices(),
-            "\n## 💱 Валюты\n" + get_currency_rates(),
-            "\n## 🏆 Топ акций по объёму\n" + get_top_stocks(10),
-            "\n## 📊 Движение рынка\n" + get_movers(5),
-            "\n## 💡 Идеи TradingView\n" + format_tradingview_ideas(get_tradingview_ideas(5)),
-        ]
-    else:
-        parts = [
-            f"# 📊 Дайджест MOEX — {now_formatted}\n",
-            "## 📈 Индексы\n" + get_moex_indices(),
-            "\n## 💱 Валюты\n" + get_currency_rates(),
-            "\n## 🏆 Топ акций по объёму\n" + get_top_stocks(10),
-            "\n## 📊 Движение рынка\n" + get_movers(5),
-            "\n## 💡 Идеи TradingView\n" + format_tradingview_ideas(get_tradingview_ideas(5)),
-        ]
+    parts = [header]
+    if notice:
+        parts.append(notice)
+    parts += [
+        "## 📈 Индексы\n" + get_moex_indices(),
+        "\n## 💱 Валюты\n" + get_currency_rates(),
+        "\n## 🏆 Топ акций по объёму\n" + get_top_stocks(10),
+        "\n## 📊 Движение рынка\n" + get_movers(5),
+        "\n## 💡 Идеи TradingView\n" + format_tradingview_ideas(get_tradingview_ideas(5)),
+    ]
 
     return "\n".join(parts)
 
