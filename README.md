@@ -222,6 +222,16 @@ Full text: [BIBLE.md](BIBLE.md)
 
 ## Changelog
 
+## v7.4.0
+- Refactored `loop.py`: extracted tool execution logic into new `ouroboros/execution.py` module (~330 lines). `loop.py` reduced from 979 to ~660 lines.
+- Fixed `tradingview.py` tool wrapper to accept `ctx` as first argument (registry compatibility).
+
+## v7.4.0
+- Extracted tool execution logic from `loop.py` into new `ouroboros/execution.py` module
+- `loop.py`: 979 → 661 lines (pure LLM orchestration)
+- `execution.py`: 348 lines (tool dispatch, timeouts, parallel execution, stateful browser)
+- Updated `ARCHITECTURE.md` with full module reference table
+
 ## v7.3.0
 - Refactored MOEX tools: extracted `moex_client.py` (507 lines, API/data layer) from `moex_digest.py` (173 lines, presentation/delivery layer)
 
