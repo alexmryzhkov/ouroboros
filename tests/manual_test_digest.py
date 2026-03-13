@@ -107,7 +107,7 @@ def print_summary() -> int:
 
 def check_fetch_json() -> str:
     """Low-level _fetch_json helper works and returns a dict."""
-    from ouroboros.tools.moex_digest import _fetch_json, MOEX_BASE
+    from ouroboros.tools.moex_client import _fetch_json, MOEX_BASE
 
     url = (
         f"{MOEX_BASE}/engines/stock/markets/index/boards/SNDX/securities.json"
@@ -122,7 +122,7 @@ def check_fetch_json() -> str:
 
 def check_parse_table() -> str:
     """_parse_table extracts columns and rows from ISS response."""
-    from ouroboros.tools.moex_digest import _parse_table
+    from ouroboros.tools.moex_client import _parse_table
 
     fake_data = {
         "mytable": {
@@ -138,7 +138,7 @@ def check_parse_table() -> str:
 
 def check_moex_indices() -> str:
     """IMOEX and RTSI values are fetched and formatted."""
-    from ouroboros.tools.moex_digest import get_moex_indices
+    from ouroboros.tools.moex_client import get_moex_indices
 
     result = get_moex_indices()
     assert isinstance(result, str), "Result must be a string"
@@ -152,7 +152,7 @@ def check_moex_indices() -> str:
 
 def check_currency_rates() -> str:
     """USD/RUB and CNY/RUB rates are fetched and formatted."""
-    from ouroboros.tools.moex_digest import get_currency_rates
+    from ouroboros.tools.moex_client import get_currency_rates
 
     result = get_currency_rates()
     assert isinstance(result, str), "Result must be a string"
@@ -169,7 +169,7 @@ def check_top_stocks() -> str:
 
     Soft pass when market is closed (no volume data available).
     """
-    from ouroboros.tools.moex_digest import get_top_stocks
+    from ouroboros.tools.moex_client import get_top_stocks
 
     result = get_top_stocks(top_n=5)
     assert isinstance(result, str), "Result must be a string"
@@ -197,7 +197,7 @@ def check_movers() -> str:
 
     Soft pass when market is closed (no LAST prices available).
     """
-    from ouroboros.tools.moex_digest import get_movers
+    from ouroboros.tools.moex_client import get_movers
 
     result = get_movers(top_n=3)
     assert isinstance(result, str), "Result must be a string"

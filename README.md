@@ -222,6 +222,9 @@ Full text: [BIBLE.md](BIBLE.md)
 
 ## Changelog
 
+## v7.3.0
+- Refactored MOEX tools: extracted `moex_client.py` (507 lines, API/data layer) from `moex_digest.py` (173 lines, presentation/delivery layer)
+
 ### v7.2.0 — MOEX Morning Digest + Cron Scheduler
 - New feature: daily Russian stock market digest at 10:00 MSK
 - New module: `supervisor/cron.py` — persistent cron scheduler (daily jobs, timezone-aware)
