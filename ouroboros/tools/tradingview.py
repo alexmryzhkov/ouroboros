@@ -131,7 +131,7 @@ def format_tradingview_ideas(ideas: list[dict], top_n: int = 5, market: str = "m
 try:
     from ouroboros.tools.registry import ToolEntry
 
-    def _tool_wrapper(top_n: int = 5, market: str = "moex") -> str:
+    def _tool_wrapper(ctx=None, top_n: int = 5, market: str = "moex") -> str:
         ideas = get_tradingview_ideas(top_n=top_n, market=market)
         return format_tradingview_ideas(ideas, top_n=top_n, market=market)
 
