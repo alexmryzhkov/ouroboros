@@ -275,6 +275,134 @@ def verify_restart(drive_root: pathlib.Path, git_sha: str) -> None:
         log.debug("Restart verification failed", exc_info=True)
 
 
+def get_runtime_health_status(env: Any) -> str:
+    """Compute runtime health invariants for LLM context.
+
+    Returns a multi-line string with one status line per check.
+    Surfaces anomalies as informational text. The LLM (not code) decides
+    what action to take based on what it reads here.
+    """
+    import json
+    import time as _time
+    import hashlib
+    from pathlib import Path
+
+    checks = []
+
+    # 1. Version sync: VERSION file vs pyproject.toml
+    try:
+        ver_file = (Path(env.repo_path("VERSION")) if hasattr(env.repo_path("VERSION"), 'read_text') else Path(str(env.repo_path("VERSION")))).read_text().strip()
+        pyproject_text = Path(str(env.repo_path("pyproject.toml"))).read_text()
+        pyproject_ver = ""
+        for line in pyproject_text.splitlines():
+            if line.strip().startswith("version"):
+                pyproject_ver = line.split("=", 1)[1].strip().strip('"').strip("'")
+                break
+        if ver_file and pyproject_ver and ver_file != pyproject_ver:
+            checks.append(f"CRITICAL: VERSION DESYNC — VERSION={ver_file}, pyproject.toml={pyproject_ver}")
+        elif ver_file:
+            checks.append(f"OK: version sync ({ver_file})")
+    except Exception:
+        pass
+
+    # 2. Budget remaining (OpenRouter ground truth)
+    try:
+        import json as _json
+        state_text = Path(str(env.drive_path("state/state.json"))).read_text()
+        state_data = _json.loads(state_text)
+        from ouroboros.context import get_budget_remaining
+        remaining = get_budget_remaining(state_data)
+        if remaining is not None:
+            if remaining < 10:
+                checks.append(f"CRITICAL: LOW BUDGET — remaining=${remaining:.2f}")
+            elif remaining < 50:
+                checks.append(f"WARNING: LOW BUDGET — remaining=${remaining:.2f}")
+            else:
+                checks.append(f"OK: budget remaining=${remaining:.2f}")
+        else:
+            checks.append("OK: budget (not yet fetched)")
+    except Exception:
+        pass
+
+    # 3. Per-task cost anomalies
+    try:
+        from supervisor.state import per_task_cost_summary
+        costly = [t for t in per_task_cost_summary(5) if t["cost"] > 5.0]
+        for t in costly:
+            checks.append(
+                f"WARNING: HIGH-COST TASK — task_id={t['task_id']} "
+                f"cost=${t['cost']:.2f} rounds={t['rounds']}"
+            )
+        if not costly:
+            checks.append("OK: no high-cost tasks (>$5)")
+    except Exception:
+        pass
+
+    # 4. Stale identity.md
+    try:
+        identity_path = Path(str(env.drive_path("memory/identity.md")))
+        if identity_path.exists():
+            age_hours = (_time.time() - identity_path.stat().st_mtime) / 3600
+            if age_hours > 8:
+                checks.append(f"WARNING: STALE IDENTITY — identity.md last updated {age_hours:.0f}h ago")
+            else:
+                checks.append("OK: identity.md recent")
+    except Exception:
+        pass
+
+    # 5. Duplicate processing detection
+    try:
+        msg_hash_to_tasks: dict = {}
+        tail_bytes = 256_000
+
+        def _scan_file_for_injected(path, type_field="type", type_value="owner_message_injected"):
+            path = Path(str(path))
+            if not path.exists():
+                return
+            file_size = path.stat().st_size
+            with path.open("r", encoding="utf-8") as f:
+                if file_size > tail_bytes:
+                    f.seek(file_size - tail_bytes)
+                    f.readline()
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        ev = json.loads(line)
+                        if ev.get(type_field) != type_value:
+                            continue
+                        text = ev.get("text", "")
+                        if not text and "event_repr" in ev:
+                            text = ev.get("event_repr", "")[:200]
+                        if not text:
+                            continue
+                        text_hash = hashlib.md5(text.encode()).hexdigest()[:12]
+                        tid = ev.get("task_id") or "unknown"
+                        if text_hash not in msg_hash_to_tasks:
+                            msg_hash_to_tasks[text_hash] = set()
+                        msg_hash_to_tasks[text_hash].add(tid)
+                    except (json.JSONDecodeError, ValueError):
+                        continue
+
+        _scan_file_for_injected(env.drive_path("logs/events.jsonl"))
+        _scan_file_for_injected(
+            env.drive_path("logs/supervisor.jsonl"),
+            type_field="event_type",
+            type_value="owner_message_injected",
+        )
+
+        duplicates = {h: tids for h, tids in msg_hash_to_tasks.items() if len(tids) > 1}
+        if duplicates:
+            checks.append(f"CRITICAL: DUPLICATE PROCESSING — {len(duplicates)} message(s) processed by multiple tasks")
+        else:
+            checks.append("OK: no duplicate message processing detected")
+    except Exception:
+        pass
+
+    return "\n".join(f"- {c}" for c in checks)
+
+
 def log_worker_boot_once(
     repo_dir: pathlib.Path,
     drive_root: pathlib.Path,

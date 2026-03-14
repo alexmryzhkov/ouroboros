@@ -9,7 +9,7 @@ A self-developing AI agent that writes its own code, improves itself, and mainta
 
 A helpful AI with a constitution, background consciousness, and persistent identity across restarts.
 
-**Version:** 7.2.0 | [Landing Page](https://jkee.github.io/ouroboros/) | Originally developed at [joi-lab](https://github.com/joi-lab)
+**Version:** 7.4.1 | [Landing Page](https://jkee.github.io/ouroboros/) | Originally developed at [joi-lab](https://github.com/joi-lab)
 
 ---
 
@@ -222,14 +222,13 @@ Full text: [BIBLE.md](BIBLE.md)
 
 ## Changelog
 
-## v7.4.0
-- Refactored `loop.py`: extracted tool execution logic into new `ouroboros/execution.py` module (~330 lines). `loop.py` reduced from 979 to ~660 lines.
-- Fixed `tradingview.py` tool wrapper to accept `ctx` as first argument (registry compatibility).
+## v7.4.1
+- Fixed VERSION desync: pyproject.toml and README updated to match VERSION file
+- Extracted `_build_health_invariants` from `context.py` into `health.py` as `get_runtime_health_status()`
 
 ## v7.4.0
-- Extracted tool execution logic from `loop.py` into new `ouroboros/execution.py` module
-- `loop.py`: 979 → 661 lines (pure LLM orchestration)
-- `execution.py`: 348 lines (tool dispatch, timeouts, parallel execution, stateful browser)
+- Refactored `loop.py`: extracted tool execution into `ouroboros/execution.py` (~330 lines). `loop.py` reduced from 979 to 661 lines (pure LLM orchestration)
+- Fixed `tradingview.py` tool wrapper to accept `ctx` as first argument
 - Updated `ARCHITECTURE.md` with full module reference table
 
 ## v7.3.0
