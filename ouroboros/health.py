@@ -282,17 +282,12 @@ def get_runtime_health_status(env: Any) -> str:
     Surfaces anomalies as informational text. The LLM (not code) decides
     what action to take based on what it reads here.
     """
-    import json
-    import time as _time
-    import hashlib
-    from pathlib import Path
-
     checks = []
 
     # 1. Version sync: VERSION file vs pyproject.toml
     try:
-        ver_file = (Path(env.repo_path("VERSION")) if hasattr(env.repo_path("VERSION"), 'read_text') else Path(str(env.repo_path("VERSION")))).read_text().strip()
-        pyproject_text = Path(str(env.repo_path("pyproject.toml"))).read_text()
+        ver_file = read_text(env.repo_path("VERSION")).strip()
+        pyproject_text = read_text(env.repo_path("pyproject.toml"))
         pyproject_ver = ""
         for line in pyproject_text.splitlines():
             if line.strip().startswith("version"):
@@ -307,10 +302,8 @@ def get_runtime_health_status(env: Any) -> str:
 
     # 2. Budget remaining (OpenRouter ground truth)
     try:
-        import json as _json
-        state_text = Path(str(env.drive_path("state/state.json"))).read_text()
-        state_data = _json.loads(state_text)
-        from ouroboros.context import get_budget_remaining
+        state_text = read_text(env.drive_path("state/state.json"))
+        state_data = json.loads(state_text)
         remaining = get_budget_remaining(state_data)
         if remaining is not None:
             if remaining < 10:
@@ -340,9 +333,9 @@ def get_runtime_health_status(env: Any) -> str:
 
     # 4. Stale identity.md
     try:
-        identity_path = Path(str(env.drive_path("memory/identity.md")))
+        identity_path = pathlib.Path(str(env.drive_path("memory/identity.md")))
         if identity_path.exists():
-            age_hours = (_time.time() - identity_path.stat().st_mtime) / 3600
+            age_hours = (time.time() - identity_path.stat().st_mtime) / 3600
             if age_hours > 8:
                 checks.append(f"WARNING: STALE IDENTITY — identity.md last updated {age_hours:.0f}h ago")
             else:
@@ -356,7 +349,7 @@ def get_runtime_health_status(env: Any) -> str:
         tail_bytes = 256_000
 
         def _scan_file_for_injected(path, type_field="type", type_value="owner_message_injected"):
-            path = Path(str(path))
+            path = pathlib.Path(str(path))
             if not path.exists():
                 return
             file_size = path.stat().st_size
