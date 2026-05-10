@@ -9,7 +9,7 @@ A self-developing AI agent that writes its own code, improves itself, and mainta
 
 A helpful AI with a constitution, background consciousness, and persistent identity across restarts.
 
-**Version:** 7.4.1 | [Landing Page](https://jkee.github.io/ouroboros/) | Originally developed at [joi-lab](https://github.com/joi-lab)
+**Version:** 7.4.2 | [Landing Page](https://jkee.github.io/ouroboros/) | Originally developed at [joi-lab](https://github.com/joi-lab)
 
 ---
 
@@ -221,6 +221,11 @@ Full text: [BIBLE.md](BIBLE.md)
 ---
 
 ## Changelog
+
+## v7.4.2
+- Extracted tool history compaction logic from `context.py` into new `ouroboros/history.py` (284 lines)
+- `context.py` reduced from 666 → 382 lines (pure context assembly)
+- No functional changes; fixes BIBLE.md section 8 (single responsibility per module)
 
 ## v7.4.1
 - Fixed VERSION desync: pyproject.toml and README updated to match VERSION file

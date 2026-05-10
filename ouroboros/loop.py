@@ -18,7 +18,7 @@ import logging
 
 from ouroboros.llm import LLMClient, normalize_reasoning_effort, add_usage
 from ouroboros.tools.registry import ToolRegistry
-from ouroboros.context import compact_tool_history, compact_tool_history_llm
+from ouroboros.history import compact_tool_history, compact_tool_history_llm
 from ouroboros.utils import utc_now_iso, append_jsonl, estimate_tokens
 from ouroboros.execution import (
     READ_ONLY_PARALLEL_TOOLS,
